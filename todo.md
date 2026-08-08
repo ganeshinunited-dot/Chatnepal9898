@@ -30,3 +30,7 @@
 
 - [x] Add a malformed-payload Vitest case for chat.send in addition to the unauthenticated guard case.
 - [x] Save and verify the final checkpoint after the malformed-payload test passes.
+
+- [x] Verify the connected GitHub remote and current branch.
+- [x] Commit the verified final KarkTech/ChatNP project state for GitHub export.
+- [x] Push the commit to the connected GitHub repository and confirm the remote branch.
