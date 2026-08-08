@@ -1,28 +1,3 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
-
-export const appRouter = router({
-    // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
-  system: systemRouter,
-  auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
-    }),
-  }),
-
-  // TODO: add feature routers here, e.g.
-  // todo: router({
-  //   list: protectedProcedure.query(({ ctx }) =>
-  //     db.getUserTodos(ctx.user.id)
-  //   ),
-  // }),
-});
-
-export type AppRouter = typeof appRouter;
+import { z } from "zod"; import { COOKIE_NAME } from "@shared/const"; import { getSessionCookieOptions } from "./_core/cookies"; import { systemRouter } from "./_core/systemRouter"; import { publicProcedure,protectedProcedure,router } from "./_core/trpc"; import { invokeLLM,listLLMModels } from "./_core/llm"; import { addChatMessage,addWaitlistEmail,countWaitlist,createConversation,getConversationMessages,listConversations } from "./db";
+const SYSTEM=`You are NP1 MONI, the Nepal-first AI model layer by ChatNP, a KarkTech product. Answer naturally in Nepali, English, or a mix. Preserve Nepali honorifics, cultural context, local geography, and romanized input. Be precise and transparent; do not invent live facts, benchmarks, or financial claims. Say when a fact needs verification. You are not a substitute for professional legal, medical, or financial advice.`;
+export const appRouter=router({system:systemRouter,auth:router({me:publicProcedure.query(o=>o.ctx.user),logout:publicProcedure.mutation(({ctx})=>{ctx.res.clearCookie(COOKIE_NAME,{...getSessionCookieOptions(ctx.req),maxAge:-1});return {success:true} as const})}),waitlist:router({count:publicProcedure.query(()=>countWaitlist()),join:publicProcedure.input(z.object({email:z.string().email(),source:z.string().max(64).optional()})).mutation(({input})=>addWaitlistEmail(input.email.toLowerCase(),input.source))}),models:publicProcedure.query(async()=>{try{return (await listLLMModels()).data}catch{return [{id:"np1-moni",object:"model",created:Date.now(),owned_by:"ChatNP"}]}}),chat:router({conversations:protectedProcedure.query(({ctx})=>listConversations(ctx.user.id)),messages:protectedProcedure.input(z.object({conversationId:z.number()})).query(({input})=>getConversationMessages(input.conversationId)),createConversation:protectedProcedure.input(z.object({title:z.string().min(1).max(160),model:z.string().default("np1-moni")})).mutation(({ctx,input})=>createConversation(ctx.user.id,input.title,input.model)),send:protectedProcedure.input(z.object({conversationId:z.number(),model:z.string().default("np1-moni"),content:z.string().min(1).max(12000)})).mutation(async({input})=>{await addChatMessage(input.conversationId,"user",input.content,input.model);const history=await getConversationMessages(input.conversationId);const r=await invokeLLM({model:input.model==="np1-moni"?undefined:input.model,max_tokens:1200,messages:[{role:"system",content:SYSTEM},...history.filter(m=>m.role!=="system").map(m=>({role:m.role as "user"|"assistant",content:m.content}))]});const raw=r.choices?.[0]?.message?.content;const text=typeof raw==="string"?raw:"माफ गर्नुहोस्, अहिले उत्तर तयार गर्न सकिनँ। फेरि प्रयास गर्नुहोस्।";await addChatMessage(input.conversationId,"assistant",text,input.model);return {content:text,model:input.model}})})}); export type AppRouter=typeof appRouter;

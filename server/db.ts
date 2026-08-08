@@ -1,92 +1,10 @@
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
-
-let _db: ReturnType<typeof drizzle> | null = null;
-
-// Lazily create the drizzle instance so local tooling can run without a DB.
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
-  }
-  return _db;
-}
-
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
-
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
-
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
-}
-
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
-}
-
-// TODO: add feature queries here as your schema grows.
+import { desc,eq,sql } from "drizzle-orm"; import { drizzle } from "drizzle-orm/mysql2"; import { chatMessages,conversations,InsertUser,users,waitlist } from "../drizzle/schema"; import { ENV } from "./_core/env";
+let _db:ReturnType<typeof drizzle>|null=null; export async function getDb(){if(!_db&&process.env.DATABASE_URL){try{_db=drizzle(process.env.DATABASE_URL)}catch(e){console.warn("[Database] Failed to connect",e)}}return _db}
+export async function upsertUser(user:InsertUser){const db=await getDb();if(!db)return;const values:InsertUser={openId:user.openId,name:user.name??null,email:user.email??null,loginMethod:user.loginMethod??null,lastSignedIn:new Date()};if(user.openId===ENV.ownerOpenId)values.role="admin";await db.insert(users).values(values).onDuplicateKeyUpdate({set:{name:values.name,email:values.email,lastSignedIn:values.lastSignedIn}})}
+export async function getUserByOpenId(openId:string){const db=await getDb();if(!db)return;const r=await db.select().from(users).where(eq(users.openId,openId)).limit(1);return r[0]}
+export async function addWaitlistEmail(email:string,source="homepage"){const db=await getDb();if(!db)return {email,source};await db.insert(waitlist).values({email,source});return (await db.select().from(waitlist).where(eq(waitlist.email,email)).limit(1))[0]}
+export async function countWaitlist(){const db=await getDb();if(!db)return 0;const r=await db.select({count:sql<number>`count(*)`}).from(waitlist);return Number(r[0]?.count??0)}
+export async function createConversation(userId:number,title:string,model:string){const db=await getDb();if(!db)return {id:Date.now(),userId,title,model};const r=await db.insert(conversations).values({userId,title,model});return {id:Number(r[0].insertId),userId,title,model}}
+export async function listConversations(userId:number){const db=await getDb();if(!db)return [];return db.select().from(conversations).where(eq(conversations.userId,userId)).orderBy(desc(conversations.updatedAt))}
+export async function getConversationMessages(conversationId:number){const db=await getDb();if(!db)return [];return db.select().from(chatMessages).where(eq(chatMessages.conversationId,conversationId)).orderBy(chatMessages.createdAt)}
+export async function addChatMessage(conversationId:number,role:"user"|"assistant"|"system",content:string,model?:string){const db=await getDb();if(db)await db.insert(chatMessages).values({conversationId,role,content,model});return {conversationId,role,content,model}}
